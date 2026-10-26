@@ -1,0 +1,42 @@
+// Synthetic showcase fixtures only; never derived from real accounts or exports.
+import {LEGACY_SETTINGS as DEFAULT_SETTINGS} from './legacySettings.js';
+import {makeLegacyShift as makeShift} from './testFixtures.js';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile,readdir} from 'node:fs/promises';
+import {PGlite} from '@electric-sql/pglite';
+import {emptySnapshot} from './plannerStore.js';
+
+test('PostgreSQL 013: archivio, retention, autorizzazioni e modifica eccezionale',async()=>{
+ const db=new PGlite(),admin='10000000-0000-0000-0000-000000000001',viewer='10000000-0000-0000-0000-000000000002',other='10000000-0000-0000-0000-000000000003';
+ const scalar=async(sql,args=[])=>(await db.query(sql,args)).rows[0]?.value;
+ const asUser=async id=>{await db.exec('reset role;set role authenticated');await db.query("select set_config('request.jwt.claim.sub',$1,false)",[id]);};
+ try{
+  await db.exec("create role anon;create role authenticated;create schema auth;create table auth.users(id uuid primary key,email text,email_confirmed_at timestamptz);create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;grant usage on schema public,auth to anon,authenticated;");
+  const dir=new URL('../supabase/migrations/',import.meta.url);for(const file of (await readdir(dir)).filter(name=>name.endsWith('.sql')&&name<'014').sort())await db.exec(await readFile(new URL(file,dir),'utf8'));
+  await db.query('insert into auth.users values($1,$2,now()),($3,$4,now()),($5,$6,now())',[admin,'admin@example.invalid',viewer,'viewer@example.invalid',other,'other@example.invalid']);
+  await asUser(admin);const account=await scalar("select public.organization_onboard('Azienda','Admin') as value"),oid=account.organization_id;
+  const snapshot=({...emptySnapshot(),settings:structuredClone(DEFAULT_SETTINGS)});snapshot.data.employees=[{id:'e1',name:'Demo Sample 016'}];snapshot.data.shifts={};
+  await scalar('select public.planner_save_effective($1::jsonb,0,true) as value',[JSON.stringify({...snapshot,expected_organization_id:oid})]);
+  await db.exec('reset role');
+  const pastDate=await scalar("select to_char(date_trunc('month',current_date)-interval '1 month','YYYY-MM-DD') as value");
+  await db.query('insert into public.archive_months(organization_id,month_start) values($1,$2)',[oid,pastDate]);
+  await db.query("insert into public.profiles(user_id,organization_id,full_name,role,employee_id,is_active) values($1,$2,'Viewer','viewer','e1',true)",[viewer,oid]);
+  await asUser(admin);await scalar("select public.archive_exceptional_edit_begin($1,$2,'MODIFICA ECCEZIONALE') as value",[oid,pastDate]);let loaded=await scalar('select public.planner_load() as value'),initial=structuredClone(loaded.snapshot);initial.data.shifts[`e1|${pastDate}`]=makeShift('Mattina');await scalar('select public.planner_save_effective($1::jsonb,$2,false) as value',[JSON.stringify({...initial,expected_organization_id:oid}),loaded.revision]);await scalar('select public.archive_exceptional_edit_end($1,$2) as value',[oid,pastDate]);let archive=await scalar('select public.archive_list($1) as value',[oid]);
+  assert.equal(archive.retention_months,24);assert.ok(archive.months.some(item=>item.month_start===pastDate));
+  await db.exec('reset role');await db.query('delete from public.archive_months where organization_id=$1 and month_start=$2',[oid,pastDate]);await db.query("insert into public.archive_months(organization_id,month_start) values($1,date_trunc('month',current_date)::date)",[oid]);await asUser(admin);archive=await scalar('select public.archive_list($1) as value',[oid]);const currentMonth=await scalar("select to_char(date_trunc('month',current_date),'YYYY-MM-DD') as value");assert.ok(archive.months.some(item=>item.month_start===pastDate),'historical data rematerializes its completed month');assert.ok(!archive.months.some(item=>item.month_start===currentMonth),'current month is never listed in Archivio');
+  loaded=await scalar('select public.planner_load() as value');let changed=structuredClone(loaded.snapshot);changed.data.shifts[`e1|${pastDate}`]=makeShift('Pomeriggio');
+  let lockedResult=await scalar('select public.planner_save_effective($1::jsonb,$2,false) as value',[JSON.stringify({...changed,expected_organization_id:oid}),loaded.revision]);assert.equal(lockedResult.snapshot.data.shifts[`e1|${pastDate}`].type,'Mattina');loaded=lockedResult;
+  const stored=(await db.query('select employee_id,date::text,type,to_char(start_time,\'HH24:MI\') start_time,to_char(end_time,\'HH24:MI\') end_time,preset_id,preset_name,preset_color,source_request_id from public.shifts where organization_id=$1 and id=$2',[oid,`e1|${pastDate}`])).rows[0];assert.deepEqual(stored,{employee_id:'e1',date:pastDate,type:'Mattina',start_time:'09:30',end_time:'17:30',preset_id:null,preset_name:null,preset_color:null,source_request_id:null});
+  const futureDate=await scalar("select to_char(current_date+interval '1 day','YYYY-MM-DD') as value"),future=structuredClone(loaded.snapshot);future.data.shifts[`e1|${futureDate}`]=makeShift('Mattina');await scalar('select public.planner_save_effective($1::jsonb,$2,false) as value',[JSON.stringify({...future,expected_organization_id:oid}),loaded.revision]);
+  await assert.rejects(scalar("select public.archive_exceptional_edit_begin($1,$2,'sì') as value",[oid,pastDate]),/Invalid exceptional edit confirmation/);
+  await scalar("select public.archive_exceptional_edit_begin($1,$2,'MODIFICA ECCEZIONALE') as value",[oid,pastDate]);loaded=await scalar('select public.planner_load() as value');changed=structuredClone(loaded.snapshot);changed.data.shifts[`e1|${pastDate}`]=makeShift('Pomeriggio');await scalar('select public.planner_save_effective($1::jsonb,$2,false) as value',[JSON.stringify({...changed,expected_organization_id:oid}),loaded.revision]);await scalar('select public.archive_exceptional_edit_end($1,$2) as value',[oid,pastDate]);
+  archive=await scalar('select public.archive_retention_update($1,12) as value',[oid]);assert.equal(archive.retention_months,12);
+  await db.exec('reset role');await db.query("insert into public.archive_months(organization_id,month_start) values($1,(date_trunc('month',current_date)-interval '12 months')::date),($1,(date_trunc('month',current_date)-interval '13 months')::date) on conflict do nothing",[oid]);
+  await asUser(admin);archive=await scalar('select public.archive_list($1) as value',[oid]);const warningMonth=await scalar("select to_char(date_trunc('month',current_date)-interval '12 months','YYYY-MM-DD') as value"),scheduledMonth=await scalar("select to_char(date_trunc('month',current_date)-interval '13 months','YYYY-MM-DD') as value"),warning=archive.months.find(item=>item.month_start===warningMonth),scheduled=archive.months.find(item=>item.month_start===scheduledMonth);assert.equal(warning.approaching_deletion,true);assert.equal(scheduled.state,'scheduled_deletion');assert.ok(scheduled.grace_until);
+  const restored=await scalar('select public.archive_deletion_cancel($1,$2) as value',[oid,scheduled.month_start]);assert.equal(restored.state,'archived');
+  for(const scope of ['month','year','all']){const result=await scalar('select public.archive_backup_record($1,$2,$3) as value',[oid,scope,scope==='all'?null:pastDate]);assert.equal(result.scope,scope);}
+  await asUser(viewer);const viewerArchive=await scalar('select public.archive_list($1) as value',[oid]);assert.ok(viewerArchive.months.length);assert.equal(viewerArchive.months.find(item=>item.month_start===pastDate).exceptional_edit_until,null);await assert.rejects(scalar('select public.archive_retention_update($1,36) as value',[oid]),/Access denied/);await assert.rejects(scalar("select public.archive_exceptional_edit_begin($1,$2,'MODIFICA ECCEZIONALE') as value",[oid,pastDate]),/Access denied/);await assert.rejects(scalar('select public.archive_backup_record($1,$2,$3) as value',[oid,'month',pastDate]),/Access denied/);
+  await asUser(other);const otherAccount=await scalar("select public.organization_onboard('Altra','Altro') as value"),otherArchive=await scalar('select public.archive_list($1) as value',[otherAccount.organization_id]);assert.deepEqual(otherArchive.months,[]);await assert.rejects(scalar('select public.archive_list($1) as value',[oid]),/Organization mismatch|Access denied/);
+ }finally{await db.close();}
+});

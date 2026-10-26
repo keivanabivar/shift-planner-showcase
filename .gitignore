@@ -1,0 +1,67 @@
+# Dependencies and package-manager caches
+node_modules/
+.pnpm-store/
+.npm/
+.yarn/
+# Environment and provider-local state
+.env
+.env.*
+!.env.example
+.vercel/
+.supabase/
+supabase/.temp/
+supabase/.branches/
+# Builds, browser output, scratch work and reports
+dist/
+build/
+coverage/
+.vite/
+work/
+tmp/
+playwright-report/
+test-results/
+*.log
+# Backups, recovery artifacts, local databases and exports
+*backup*/
+*rehearsal*/
+backups/
+recovery/
+Guida Rapida/
+*.backup
+*.dump
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.sql
+!supabase/migrations/*.sql
+*.csv
+*.tsv
+*.zip
+*.tar
+*.gz
+*.tgz
+*.7z
+*backup*.json
+# Signing material and machine-specific settings
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx
+*.mobileprovision
+.DS_Store
+.idea/
+# Private handoffs, operational reports and credential files
+MASTER_HANDOFF.md
+PROJECT_HANDOFF.md
+OPERATIONS.md
+*REHEARSAL*.md
+.npmrc
+.netrc
+.pypirc
+credentials*.json
+service-account*.json
+*.keystore
+*.jks

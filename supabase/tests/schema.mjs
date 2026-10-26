@@ -1,0 +1,27 @@
+const {PGlite}=await import(process.env.PGLITE_MODULE||'@electric-sql/pglite');
+import {readFile} from 'node:fs/promises';
+import assert from 'node:assert/strict';
+import {fileURLToPath} from 'node:url';
+const root=fileURLToPath(new URL('../../',import.meta.url)).replace(/\/$/,'');
+const {canonical}=await import(root+'/src/persistence.js');
+const {emptySnapshot}=await import(root+'/src/plannerStore.js');
+const db=new PGlite();
+await db.exec(`create role anon; create role authenticated; create schema auth; create table auth.users(id uuid primary key); create function auth.uid() returns uuid language sql as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;`);
+for(const name of ['001_planner.sql','002_access_and_validation.sql']){await db.exec(await readFile(root+'/supabase/migrations/'+name,'utf8'));console.log('Applied',name);}
+await db.exec('set role anon');
+await assert.rejects(db.query('select public.planner_load()'),/Access denied/);
+await assert.rejects(db.query('select * from public.employees'),/permission denied/);
+await assert.rejects(db.query('select public.planner_load_internal()'),/permission denied/);
+await db.exec('reset role');
+await db.exec('update public.planner_access set public_test_mode=true where id=true');
+await db.exec('set role anon');
+const load=async()=> (await db.query('select public.planner_load() as result')).rows[0].result;
+const save=async(s,r,empty=false)=> (await db.query('select public.planner_save($1::jsonb,$2::bigint,$3::boolean) as result',[JSON.stringify(s),r,empty])).rows[0].result;
+assert.equal((await load()).empty,true);
+const snapshot=emptySnapshot();snapshot.data.employees=[{id:'legacy-employee',name:'Demo Sample 016'}];snapshot.data.shifts={'legacy-employee|2026-10-01':{type:'Centrale',start:'10:00',end:'18:00',off:false}};snapshot.notes=[{id:'n',text:'Nota',date:'',employeeId:'legacy-employee'}];snapshot.variations={'legacy-employee|2026-10-01':{employeeId:'legacy-employee',date:'2026-10-01',start:'11:00',end:'18:00',reason:'Ritardo',customReason:'',note:'Traffico'}};
+let result=await save(snapshot,0,true);assert.equal(result.revision,1);assert.deepEqual(result.snapshot,canonical(snapshot));
+await assert.rejects(save(snapshot,0),/Revision conflict/);await assert.rejects(save(snapshot,null),/Invalid revision/);await assert.rejects(save(snapshot,1,true),/Database not empty/);
+const invalid=structuredClone(snapshot);invalid.data.shifts['missing|2026-10-01']={type:'Ferie',off:true};await assert.rejects(save(invalid,1),/Orphan shift/);assert.equal((await load()).revision,1);
+const removed=emptySnapshot();removed.notes=[{...snapshot.notes[0],employeeId:''}];result=await save(removed,1);assert.equal(result.snapshot.notes.length,1);assert.deepEqual(result.snapshot.variations,{});assert.equal(result.snapshot.data.employees.length,0);
+await db.exec('reset role');await db.exec('update public.planner_access set public_test_mode=false where id=true');await db.exec('set role anon');await assert.rejects(load(),/Access denied/);
+console.log('PASS: fresh schema, deny-by-default, protected internals, atomic import, round-trip entities, revision conflicts, rejected invalid references, employee deletion and note preservation.');await db.close();

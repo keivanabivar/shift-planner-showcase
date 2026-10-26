@@ -1,0 +1,30 @@
+{
+  "name": "shift-planner-showcase",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "node --test src/*.test.js",
+    "test:auth-ui": "node scripts/check-auth-ui.mjs",
+    "test:mobile": "CHECK_MOBILE_PLANNER=1 node scripts/check-auth-ui.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.117.2",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.8",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "playwright": "^1.63.0",
+    "vite": "^7.1.7"
+  },
+  "description": "A multi-branch workforce scheduling showcase with React and Supabase.",
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

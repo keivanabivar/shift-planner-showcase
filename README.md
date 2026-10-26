@@ -15,6 +15,24 @@ This is a sanitized portfolio snapshot. It contains no production accounts, cred
 - Export print layouts, PDF, CSV, JSON and archive packages.
 - Use a responsive planner in desktop and mobile web browsers.
 
+## Screenshots
+
+Actual application views captured locally with synthetic demo data and a mocked backend.
+
+![Weekly shift planner with demo employees and two branches](docs/images/planner-overview.png)
+*Weekly planning across branches, with shift templates and attendance variations.*
+
+<details>
+<summary>Branch access and hours reporting</summary>
+
+![Branch access management with synthetic users and roles](docs/images/multi-branch-access.png)
+*Branch assignments, user roles and visibility controls.*
+
+![Planned and actual hours for demo employees](docs/images/reports-or-requests.png)
+*Planned versus actual hours, attendance differences and export options.*
+
+</details>
+
 ## Stack and architecture
 
 React 19 · Vite 7 · Supabase Auth/PostgreSQL · Row Level Security · jsPDF · Node test runner · PGlite · Playwright.
@@ -68,10 +86,6 @@ This is a development showcase, not a turnkey hosted service. The database migra
 - Email delivery, redirect settings, recovery and production authorization require testing in each independent deployment.
 - Self-service account deletion and multi-organization account switching are not implemented.
 - Informational/privacy pages are demonstration placeholders, not deployment-ready legal documents.
-
-## Screenshots
-
-The Italian user guide includes reviewed illustrative screenshots with identifying fields neutralized.
 
 ## Italian user guide
 
